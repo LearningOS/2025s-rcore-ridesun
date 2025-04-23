@@ -153,6 +153,26 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+    fn syscall_times(&self,id:usize)->u32{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_syscall_times[id]
+    }
+    fn update_syscall_times(&self,id:usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_syscall_times[id]+=1;
+    }
+    fn mmap_cur_task(&self,start:usize,len:usize,prot:usize)->Result<(),&'static str>{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.alloc_vm(start,len,prot)
+    }
+    fn munmap_cur_task(&self,start:usize,len:usize)->Result<(),&'static str>{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.free_vm(start,len)
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +221,22 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// alloc a new virtual memory
+pub fn mmap_cur_task(start:usize,len:usize,prot:usize)->Result<(),&'static str>{
+    TASK_MANAGER.mmap_cur_task(start,len,prot)
+}
+
+/// free virtual memory
+pub fn munmap_cur_task(start:usize,len:usize)->Result<(),&'static str>{
+    TASK_MANAGER.munmap_cur_task(start,len)
+}
+/// Get the current 'Running' task's syscall times.s
+pub fn get_syscall_times(id:usize)->u32{
+    TASK_MANAGER.syscall_times(id)
+}
+/// Update the current 'Running' task's syscall times.
+pub fn update_syscall_times(id:usize){
+    TASK_MANAGER.update_syscall_times(id)
 }
