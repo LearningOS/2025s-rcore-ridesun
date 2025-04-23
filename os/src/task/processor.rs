@@ -44,6 +44,17 @@ impl Processor {
     pub fn current(&self) -> Option<Arc<TaskControlBlock>> {
         self.current.as_ref().map(Arc::clone)
     }
+
+    fn mmap_cur_task(&self,start:usize,len:usize,port:usize)->Result<(),&'static str>{
+        let current=self.current().unwrap();
+        let mut inner = current.inner_exclusive_access();
+        inner.memory_set.alloc_vm(start,len,port)
+    }
+    fn munmap_cur_task(&self,start:usize,len:usize)->Result<(),&'static str>{
+        let current=self.current().unwrap();
+        let mut inner = current.inner_exclusive_access();
+        inner.memory_set.free_vm(start,len)
+    }
 }
 
 lazy_static! {
@@ -108,4 +119,14 @@ pub fn schedule(switched_task_cx_ptr: *mut TaskContext) {
     unsafe {
         __switch(switched_task_cx_ptr, idle_task_cx_ptr);
     }
+}
+
+/// alloc a new virtual memory
+pub fn mmap_cur_task(start:usize,len:usize,prot:usize)->Result<(),&'static str>{
+    PROCESSOR.exclusive_access().mmap_cur_task(start,len,prot)
+}
+
+/// free virtual memory
+pub fn munmap_cur_task(start:usize,len:usize)->Result<(),&'static str>{
+    PROCESSOR.exclusive_access().munmap_cur_task(start,len)
 }
