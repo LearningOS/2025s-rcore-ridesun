@@ -1,13 +1,14 @@
 //! Types related to task management & Functions for completely changing TCB
-use super::TaskContext;
+use super::{add_task, current_user_token, TaskContext, BIG_STRIDE};
 use super::{kstack_alloc, pid_alloc, KernelStack, PidHandle};
 use crate::config::TRAP_CONTEXT_BASE;
-use crate::mm::{MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
+use crate::mm::{translated_str, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE};
 use crate::sync::UPSafeCell;
 use crate::trap::{trap_handler, TrapContext};
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::cell::RefMut;
+use crate::loader::get_app_data_by_name;
 
 /// Task control block structure
 ///
@@ -68,6 +69,12 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// stride
+    pub stride:usize,
+
+    /// priority
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +125,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -131,6 +140,26 @@ impl TaskControlBlock {
             trap_handler as usize,
         );
         task_control_block
+    }
+
+    /// Spawn a new process
+    pub fn spawn(self:&Arc<Self>,path:*const u8)->isize{
+        let token=current_user_token();
+        let path=translated_str(token,path);
+        if let Some(data)=get_app_data_by_name(path.as_str()){
+            let mut parent_inner=self.inner_exclusive_access();
+            let tcb=Arc::new(TaskControlBlock::new(data));
+            let mut tcb_inner=tcb.inner_exclusive_access();
+
+            tcb_inner.parent=Some(Arc::downgrade(self));
+            parent_inner.children.push(tcb.clone());
+            drop(tcb_inner);
+
+            let pid=tcb.pid.0;
+            add_task(tcb);
+            return pid as isize;
+        }
+        -1
     }
 
     /// Load a new elf to replace the original application address space and start execution
@@ -191,6 +220,8 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
@@ -235,6 +266,21 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// set priority
+    pub fn set_priority(&self, priority:isize) ->isize{
+        if priority<2{
+            return -1;
+        }
+        let mut inner=self.inner_exclusive_access();
+        inner.priority=priority as usize;
+        priority
+    }
+    /// pass
+    pub fn pass(&self){
+        let mut inner=self.inner_exclusive_access();
+        inner.stride=inner.stride.saturating_add(BIG_STRIDE/inner.priority);
     }
 }
 

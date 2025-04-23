@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 use core::arch::asm;
 use lazy_static::*;
 use riscv::register::satp;
+use crate::mm::address::SimpleRange;
 
 extern "C" {
     fn stext();
@@ -299,6 +300,59 @@ impl MemorySet {
         } else {
             false
         }
+    }
+    /// alloc a part of  new virtual memory
+    pub fn alloc_vm(&mut self,start: usize, len: usize, prot: usize)->Result<(),&'static str>{
+        let start_va=VirtAddr::from(start);
+        if !start_va.aligned(){
+            return Err("don't aligned");
+        }
+        if prot & !0x7 != 0 {
+            return Err("must all be 0");
+        }
+        if prot & 0x7 == 0 {
+            return Err("no mean");
+        }
+        let end_va=VirtAddr::from(start+len);
+        let start_vpn =VirtPageNum::from(start_va);
+        let end_vpn=VirtAddr::ceil(&end_va);
+        let flags=PTEFlags::from(prot);
+        let iter=SimpleRange::new(start_vpn,end_vpn);
+        for vpn in iter {
+            if let Some(pte)=self.page_table.translate(vpn){
+                if pte.is_valid(){
+                    return Err("this page not be freed");
+                }
+            }
+            if let Some(ppn)=frame_alloc(){
+                self.page_table.map(vpn,ppn.ppn,flags);
+            }else {
+                return Err("can't alloc frame")
+            }
+        }
+        Ok(())
+    }
+    /// free a part of virtual memory
+    pub fn free_vm(&mut self, start:usize, len:usize) ->Result<(),&'static str>{
+        let start_va=VirtAddr::from(start);
+        if !start_va.aligned(){
+            return Err("don't aligned");
+        }
+        let end_va=VirtAddr::from(start+len);
+        let start_vpn=VirtPageNum::from(start_va);
+        let end_vpn=VirtAddr::ceil(&end_va);
+        let iter=SimpleRange::new(start_vpn,end_vpn);
+        for vpn in iter {
+            if let Some(pte)=self.page_table.translate(vpn){
+                if !pte.is_valid(){
+                    return Err("this page not be alloc")
+                }
+            }else {
+                return Err("can't get the page table entry")
+            }
+            self.page_table.unmap(start_vpn);
+        }
+        Ok(())
     }
 }
 /// map area structure, controls a contiguous piece of virtual memory
